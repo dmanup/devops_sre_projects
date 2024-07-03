@@ -18,7 +18,7 @@ AWS_ACCOUNT_ID = sts.get_caller_identity()["Account"]
 
 KEY_PAIR_NAME = "dmanup-aws-codecomit-demo-keypair"
 KEY_PAIR_FILE = f"{KEY_PAIR_NAME}.pem"
-LOCAL_PATH = "D:/devops_articles/aws-paas-beanstalk/vprofile-project/target/vprofile-v2.war"
+LOCAL_PATH = "D:/devops_articles/aws-code-commit/vprofile-project/target/vprofile-v2.war"
 S3_BUCKET = "dmanup-aws-codecomit-demo-bucket"
 S3_KEY = "vprofile-v2.war"
 DESTINATION_PATH = f"s3://{S3_BUCKET}/{S3_KEY}"
@@ -271,6 +271,7 @@ solution_stack_name = next(
     stack for stack in elasticbeanstalk.list_available_solution_stacks()['SolutionStacks']
     if "64bit Amazon Linux 2" in stack and "Corretto 11" in stack and "Tomcat 8.5" in stack
 )
+print(f"Solution Stack Name/Platform version:{solution_stack_name}")
 
 # Create an Elastic Beanstalk environment
 elasticbeanstalk.create_environment(

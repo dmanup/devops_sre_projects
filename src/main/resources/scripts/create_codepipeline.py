@@ -18,7 +18,6 @@ codepipeline = boto3.client('codepipeline', region_name=REGION)
 iam = boto3.client('iam', region_name=REGION)
 s3 = boto3.client('s3', region_name=REGION)
 
-
 # Function to create a CodeCommit repository
 def create_codecommit_repo(repo_name):
     try:
@@ -30,7 +29,6 @@ def create_codecommit_repo(repo_name):
     except codecommit.exceptions.RepositoryNameExistsException:
         print(f"CodeCommit repository {repo_name} already exists.")
 
-
 # Function to create an S3 bucket for artifacts
 def create_s3_bucket(bucket_name):
     try:
@@ -41,14 +39,12 @@ def create_s3_bucket(bucket_name):
     except s3.exceptions.BucketAlreadyExists:
         print(f"S3 bucket {bucket_name} already exists.")
 
-
 # Function to create a CodeBuild project
 def create_codebuild_project(project_name, artifact_bucket, role_arn):
     try:
         codebuild.create_project(
             name=project_name,
-            source={'type': 'CODECOMMIT',
-                    'location': f"https://git-codecommit.{REGION}.amazonaws.com/v1/repos/{REPO_NAME}"},
+            source={'type': 'CODECOMMIT', 'location': f"https://git-codecommit.{REGION}.amazonaws.com/v1/repos/{REPO_NAME}"},
             artifacts={'type': 'S3', 'location': artifact_bucket},
             environment={
                 'type': 'LINUX_CONTAINER',
@@ -61,7 +57,6 @@ def create_codebuild_project(project_name, artifact_bucket, role_arn):
         print(f"Created CodeBuild project: {project_name}")
     except codebuild.exceptions.ResourceAlreadyExistsException:
         print(f"CodeBuild project {project_name} already exists.")
-
 
 # Function to create a CodeDeploy application and deployment group
 def create_codedeploy_app_and_group(app_name, group_name, role_arn):
@@ -80,12 +75,11 @@ def create_codedeploy_app_and_group(app_name, group_name, role_arn):
             deploymentConfigName='CodeDeployDefault.OneAtATime',
             ec2TagFilters=[{'Key': 'Name', 'Value': 'CodeDeployDemo', 'Type': 'KEY_AND_VALUE'}],
             autoScalingGroups=[],
-            deploymentStyle={'deploymentType': 'IN_PLACE', 'deploymentOption': 'WITH_TRAFFIC_CONTROL'}
+            deploymentStyle={'deploymentType': 'IN_PLACE', 'deploymentOption': 'WITHOUT_TRAFFIC_CONTROL'}
         )
         print(f"Created CodeDeploy deployment group: {group_name}")
     except codedeploy.exceptions.DeploymentGroupAlreadyExistsException:
         print(f"CodeDeploy deployment group {group_name} already exists.")
-
 
 # Function to create a CodePipeline
 def create_codepipeline(pipeline_name, role_arn, artifact_bucket):
@@ -162,17 +156,14 @@ def create_codepipeline(pipeline_name, role_arn, artifact_bucket):
     except codepipeline.exceptions.PipelineNameInUseException:
         print(f"CodePipeline {pipeline_name} already exists.")
 
-
-
 # Create IAM roles for CodeBuild, CodeDeploy, and CodePipeline
-def create_iam_role(role_name, policy_arn):
+def create_iam_role(role_name, policy_arn, service_principal):
     try:
         assume_role_policy_document = json.dumps({
             'Version': '2012-10-17',
             'Statement': [{
                 'Effect': 'Allow',
-                'Principal': {
-                    'Service': 'codebuild.amazonaws.com' if 'build' in role_name else 'codedeploy.amazonaws.com' if 'deploy' in role_name else 'codepipeline.amazonaws.com'},
+                'Principal': {'Service': service_principal},
                 'Action': 'sts:AssumeRole'
             }]
         })
@@ -186,6 +177,25 @@ def create_iam_role(role_name, policy_arn):
         print(f"IAM Role {role_name} already exists.")
     return f"arn:aws:iam::{boto3.client('sts').get_caller_identity().get('Account')}:role/{role_name}"
 
+# Function to attach custom policy to the role
+def attach_custom_policy_to_role(role_name, policy_name, policy_document):
+    try:
+        policy_response = iam.create_policy(
+            PolicyName=policy_name,
+            PolicyDocument=json.dumps(policy_document)
+        )
+        iam.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn=policy_response['Policy']['Arn']
+        )
+        print(f"Attached custom policy {policy_name} to role {role_name}.")
+    except iam.exceptions.EntityAlreadyExistsException:
+        policy_arn = f"arn:aws:iam::{boto3.client('sts').get_caller_identity().get('Account')}:policy/{policy_name}"
+        iam.attach_role_policy(
+            RoleName=role_name,
+            PolicyArn=policy_arn
+        )
+        print(f"Custom policy {policy_name} already exists and attached to role {role_name}.")
 
 # Create CodeCommit repository
 create_codecommit_repo(REPO_NAME)
@@ -194,11 +204,28 @@ create_codecommit_repo(REPO_NAME)
 create_s3_bucket(ARTIFACT_BUCKET)
 
 # Create IAM roles for CodeBuild, CodeDeploy, and CodePipeline
-codebuild_role_arn = create_iam_role('codebuild-service-role', 'arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess')
-codedeploy_role_arn = create_iam_role('codedeploy-service-role',
-                                      'arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole')
-codepipeline_role_arn = create_iam_role('codepipeline-service-role',
-                                        'arn:aws:iam::aws:policy/AWSCodePipelineFullAccess')
+codebuild_role_arn = create_iam_role('codebuild-service-role', 'arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess', 'codebuild.amazonaws.com')
+codedeploy_role_arn = create_iam_role('codedeploy-service-role', 'arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole', 'codedeploy.amazonaws.com')
+codepipeline_role_arn = create_iam_role('codepipeline-service-role', 'arn:aws:iam::aws:policy/AWSCodePipelineFullAccess', 'codepipeline.amazonaws.com')
+
+# Attach custom policy to codepipeline-service-role
+custom_policy_document = {
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "codecommit:GitPull",
+                "codecommit:GetBranch",
+                "codecommit:GetCommit",
+                "codecommit:ListRepositories",
+                "codecommit:ListBranches"
+            ],
+            "Resource": f"arn:aws:codecommit:{REGION}:{boto3.client('sts').get_caller_identity().get('Account')}:{REPO_NAME}"
+        }
+    ]
+}
+attach_custom_policy_to_role('codepipeline-service-role', 'CodePipelineCodeCommitAccessPolicy', custom_policy_document)
 
 # Create CodeBuild project
 create_codebuild_project(BUILD_PROJECT_NAME, ARTIFACT_BUCKET, codebuild_role_arn)

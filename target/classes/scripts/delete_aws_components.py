@@ -33,7 +33,8 @@ def delete_mq_broker(broker_id):
     try:
         mq.delete_broker(BrokerId=broker_id)
         print(f"Deleting MQ broker: {broker_id}")
-        time.sleep(60)  # Wait for MQ broker to be deleted
+        waiter = mq.get_waiter('broker_deleted')
+        waiter.wait(BrokerId=broker_id)
         print(f"MQ broker {broker_id} deleted successfully.")
     except mq.exceptions.NotFoundException:
         print(f"MQ broker {broker_id} not found.")
@@ -52,35 +53,54 @@ def delete_elasticache_cluster(cluster_id):
 
 def remove_inbound_rules_from_backend_sg(env_name, backend_security_group_name, region):
     # Fetch the Auto Scaling group name associated with the Elastic Beanstalk environment
-    response = elasticbeanstalk.describe_environment_resources(
-        EnvironmentName=env_name
-    )
-    auto_scaling_group_name = response['EnvironmentResources']['AutoScalingGroups'][0]['Name']
-    print(f"AUTO_SCALING_GROUP_NAME: {auto_scaling_group_name}")
+    try:
+        response = elasticbeanstalk.describe_environment_resources(
+            EnvironmentName=env_name
+        )
+        auto_scaling_group_name = response['EnvironmentResources']['AutoScalingGroups'][0]['Name']
+        print(f"AUTO_SCALING_GROUP_NAME: {auto_scaling_group_name}")
+    except Exception as e:
+        print(f"Error fetching Auto Scaling group: {e}")
+        return
 
     # Fetch the instance IDs from the Auto Scaling group
-    response = ec2.describe_instances(
-        Filters=[{'Name': 'tag:aws:autoscaling:groupName', 'Values': [auto_scaling_group_name]}]
-    )
-    instance_ids = [instance['InstanceId'] for reservation in response['Reservations'] for instance in
-                    reservation['Instances']]
-    print(f"INSTANCE_IDS: {instance_ids}")
+    try:
+        response = ec2.describe_instances(
+            Filters=[{'Name': 'tag:aws:autoscaling:groupName', 'Values': [auto_scaling_group_name]}]
+        )
+        instance_ids = [instance['InstanceId'] for reservation in response['Reservations'] for instance in
+                        reservation['Instances']]
+        print(f"INSTANCE_IDS: {instance_ids}")
+    except Exception as e:
+        print(f"Error fetching instance IDs: {e}")
+        return
 
     # Fetch the security group IDs associated with the instances
     security_group_ids = set()
-    for instance_id in instance_ids:
-        response = ec2.describe_instances(InstanceIds=[instance_id])
-        security_groups = response['Reservations'][0]['Instances'][0]['SecurityGroups']
-        for sg in security_groups:
-            security_group_ids.add(sg['GroupId'])
-    print(f"INSTANCE_SECURITY_GROUP_IDS: {security_group_ids}")
+    try:
+        for instance_id in instance_ids:
+            response = ec2.describe_instances(InstanceIds=[instance_id])
+            security_groups = response['Reservations'][0]['Instances'][0]['SecurityGroups']
+            for sg in security_groups:
+                security_group_ids.add(sg['GroupId'])
+        print(f"INSTANCE_SECURITY_GROUP_IDS: {security_group_ids}")
+    except Exception as e:
+        print(f"Error fetching security group IDs: {e}")
+        return
 
     # Fetch the backend security group ID
-    response = ec2.describe_security_groups(
-        Filters=[{'Name': 'group-name', 'Values': [backend_security_group_name]}]
-    )
-    backend_security_group_id = response['SecurityGroups'][0]['GroupId']
-    print(f"BACKEND_SECURITY_GROUP_ID: {backend_security_group_id}")
+    try:
+        response = ec2.describe_security_groups(
+            Filters=[{'Name': 'group-name', 'Values': [backend_security_group_name]}]
+        )
+        if not response['SecurityGroups']:
+            print(f"Backend security group {backend_security_group_name} not found.")
+            return
+        backend_security_group_id = response['SecurityGroups'][0]['GroupId']
+        print(f"BACKEND_SECURITY_GROUP_ID: {backend_security_group_id}")
+    except Exception as e:
+        print(f"Error fetching backend security group ID: {e}")
+        return
 
     # Remove inbound rules
     for sg_id in security_group_ids:
@@ -118,6 +138,8 @@ def delete_elastic_beanstalk(env_name, app_name, backend_security_group_name):
         print(f"Deleted Elastic Beanstalk application: {app_name}")
     except elasticbeanstalk.exceptions.ResourceNotFoundException:
         print(f"Elastic Beanstalk environment or application {env_name} not found.")
+    except Exception as e:
+        print(f"Error terminating Elastic Beanstalk environment: {e}")
 
 
 def delete_codecommit_repo(repo_name):
@@ -144,6 +166,8 @@ def delete_s3_bucket(bucket_name):
         print(f"Deleted S3 bucket: {bucket_name}")
     except s3.exceptions.NoSuchBucket:
         print(f"S3 bucket {bucket_name} not found.")
+    except Exception as e:
+        print(f"Error deleting S3 bucket {bucket_name}: {e}")
 
 
 # Parameters
